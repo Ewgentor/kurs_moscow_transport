@@ -31,11 +31,20 @@ def load_data():
 df = load_data()
 
 # Боковая панель
-st.sidebar.header("Фильтры и параметры модели")
-districts = ["Все районы округа"] + sorted(df['District'].dropna().unique().tolist())
+st.sidebar.header("Географический охват")
+adm_areas = ["Вся Москва (все округа)"] + sorted(df['AdmArea'].dropna().unique().tolist())
+selected_area = st.sidebar.selectbox("Административный округ:", adm_areas, index=1) # по умолчанию откроется первый округ, но можно выбрать всю Москву
+
+if selected_area != "Вся Москва (все округа)":
+    area_df = df[df['AdmArea'] == selected_area].copy()
+else:
+    area_df = df.copy()
+
+districts = ["Все районы"] + sorted(area_df['District'].dropna().unique().tolist())
 selected_district = st.sidebar.selectbox("Район:", districts)
 
-filtered_df = df if selected_district == "Все районы округа" else df[df['District'] == selected_district].copy()
+filtered_df = area_df if selected_district == "Все районы" else area_df[area_df['District'] == selected_district].copy()
+
 
 # Подготовка словаря маршрутов (сохраняем словари, а не объекты Series)
 route_stops_map = {}
@@ -100,9 +109,10 @@ with tab1:
 
     with chart_col:
         st.subheader("Зависимость потока от удаленности метро")
+        scatter_df = filtered_df.sample(2000, random_state=42) if len(filtered_df) > 2000 else filtered_df
         fig_scatter = px.scatter(
-            filtered_df, x='dist_to_metro_m', y='peak_passengers_per_hour',
-            color='District', hover_data=['Name', 'nearest_metro'],
+            scatter_df, x='dist_to_metro_m', y='peak_passengers_per_hour',
+            color='AdmArea', hover_data=['Name', 'nearest_metro'],
             labels={'dist_to_metro_m': 'Расстояние до метро (м)', 'peak_passengers_per_hour': 'Пассажиров в час'}
         )
         fig_scatter.update_layout(height=480, showlegend=False)
@@ -173,17 +183,28 @@ with tab3:
     st.subheader("Поиск дублирующих маршрутов (Индекс Жаккара)")
     threshold = st.slider("Минимальный порог дублирования (%)", 30, 90, 55)
 
-    route_id_sets = {r: set(pd.DataFrame(stops)['ID']) for r, stops in valid_routes.items()}
+    local_route_ids = {}
+    for record in area_df.to_dict('records'):
+        for r in str(record.get('RouteNumbers', '')).split(';'):
+            r = r.strip()
+            if r and r.lower() not in ['none', 'nan', '']:
+                local_route_ids.setdefault(r, set()).add(record['ID'])
+
+    valid_local_ids = {r: ids for r, ids in local_route_ids.items() if len(ids) >= 5}
+
     duplicates = []
-    for r1, r2 in combinations(route_id_sets.keys(), 2):
-        s1, s2 = route_id_sets[r1], route_id_sets[r2]
-        sim = (len(s1 & s2) / len(s1 | s2)) * 100
+    for r1, r2 in combinations(valid_local_ids.keys(), 2):
+        s1, s2 = valid_local_ids[r1], valid_local_ids[r2]
+        inter = len(s1 & s2)
+        if inter == 0:  # мгновенный отсев непересекающихся маршрутов
+            continue
+        sim = (inter / len(s1 | s2)) * 100
         if sim >= threshold:
             duplicates.append({
                 "Маршрут 1": r1, "Маршрут 2": r2,
-                "Общих остановок": len(s1 & s2),
+                "Общих остановок": inter,
                 "Совпадение (%)": round(sim, 1),
-                "Управленческое решение": "Объединение маршрутов" if sim > 75 else "Тактовое расписание (сдвиг на пол-интервала)"
+                "Управленческое решение": "Объединение маршрутов" if sim > 75 else "Тактовое расписание"
             })
     dup_df = pd.DataFrame(duplicates).sort_values(by="Совпадение (%)", ascending=False)
     st.dataframe(dup_df, use_container_width=True)

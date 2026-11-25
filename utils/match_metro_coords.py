@@ -42,10 +42,8 @@ stops['lon'] = pd.to_numeric(stops['Longitude_WGS84'], errors='coerce')
 stops['lat'] = pd.to_numeric(stops['Latitude_WGS84'], errors='coerce')
 stops = stops.dropna(subset=['lat', 'lon'])
 
-# Фильтруем Северо-Западный административный округ (СЗАО)
-# При желании можно поменять на любой другой округ Москвы
-target_area = 'Северо-Западный административный округ'
-stops_filtered = stops[stops['AdmArea'] == target_area].copy()
+
+stops_filtered = stops[stops['AdmArea'].notna()].copy()
 
 # 4. Поиск ближайшей станции метро для каждой остановки
 tree = cKDTree(np.radians(metro[['lat', 'lon']].values))
@@ -80,8 +78,6 @@ stops_filtered['peak_passengers_per_hour'] = stops_filtered.apply(simulate_peak_
 stops_filtered['CleanName'] = stops_filtered['StationName'].fillna(stops_filtered['Name'])
 
 # Сохраняем итоговый датасет для веб-приложения
-cols = ['ID', 'CleanName', 'Direction', 'District', 'RouteNumbers', 'lat', 'lon', 'nearest_metro', 'dist_to_metro_m',
-        'peak_passengers_per_hour']
-stops_filtered[cols].rename(columns={'CleanName': 'Name'}).to_csv('transport_data.csv', index=False,
-                                                                  encoding='utf-8-sig')
-print(f"Успешно! Создан файл transport_data.csv ({len(stops_filtered)} активных остановок в СЗАО).")
+cols = ['ID', 'CleanName', 'Direction', 'AdmArea', 'District', 'RouteNumbers', 'lat', 'lon', 'nearest_metro', 'dist_to_metro_m', 'peak_passengers_per_hour']
+stops_filtered[cols].rename(columns={'CleanName': 'Name'}).to_csv('transport_data.csv', index=False, encoding='utf-8-sig')
+print(f"Готово! Сохранено {len(stops_filtered)} остановок по всем округам Москвы.")
